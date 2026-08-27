@@ -306,6 +306,133 @@
   .tag.blue{background:rgba(10,132,255,.15);color:var(--signal);border:1px solid rgba(10,132,255,.3)}
   .tag.green{background:rgba(48,209,88,.15);color:var(--ok);border:1px solid rgba(48,209,88,.3)}
   .tag.red{background:rgba(231,34,46,.15);color:var(--m-red);border:1px solid rgba(231,34,46,.3)}
+
+  /* ============================================================
+     MOBILE / TABLET RESPONSIVE LAYER
+     ============================================================ */
+
+  html,body{max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%}
+  img,canvas,video,svg{max-width:100%}
+
+  /* Tablet & down --------------------------------------------- */
+  @media (max-width:900px){
+    .stage{position:static;top:auto;height:auto;max-height:none;border-left:0;border-top:1px solid var(--line)}
+    .flow{max-width:100%!important;padding:16px 16px 90px}
+    .video-shell,.pano-shell,.meta-shell,.mockup-grid{padding:16px}
+    .picks{grid-template-columns:repeat(2,1fr)!important}
+  }
+
+  /* Phones ---------------------------------------------------- */
+  @media (max-width:640px){
+    body{font-size:13px}
+
+    /* Header stops sticking so the tab bar owns the top edge */
+    header{position:static;padding:9px 14px;gap:10px;flex-wrap:wrap}
+    header h1{font-size:15px}
+    .mark{width:32px;height:32px}
+    .badge-v5{font-size:8.5px;padding:2px 5px;margin-left:4px}
+    .head-actions{gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .head-actions .btn{padding:7px 11px;font-size:11.5px}
+    .profile-select{padding:5px 9px;font-size:11px;max-width:44vw}
+
+    .app-tabs{top:0;padding:7px 12px;gap:5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .app-tabs::-webkit-scrollbar{display:none}
+    .app-tab{padding:7px 12px;font-size:11.5px}
+    .feature-strip{padding:6px 12px}
+
+    /* Workspace */
+    .wrap{grid-template-columns:1fr}
+    .flow{padding:14px 12px 84px}
+    .stage{padding:14px 12px}
+
+    /* Steps */
+    .step{border-radius:13px;margin-bottom:10px}
+    .step-head{padding:12px 13px;gap:9px}
+    .step-body{padding:0 13px 14px}
+    .step-title{font-size:13px}
+    .step-sub{display:block;margin-left:0;margin-top:2px;font-size:11px}
+
+    /* Form controls — 16px keeps iOS from zooming on focus */
+    textarea,input[type=text],input[type=number],select{font-size:16px;padding:11px 12px}
+    textarea{min-height:96px}
+    .row{gap:8px}
+    .row>*{flex:1 1 100%;min-width:0}
+
+    /* Sliders stack their label above the track */
+    .tune{grid-template-columns:1fr auto;gap:4px 10px}
+    .tune label{grid-column:1 / -1}
+    input[type=range]{height:26px}
+
+    /* Grids */
+    .picks,.picks-3{grid-template-columns:repeat(2,1fr)!important}
+    .picks-4{grid-template-columns:repeat(3,1fr)}
+    .pick{padding:8px;border-radius:11px}
+    .pick .swatch{height:34px}
+
+    /* Buttons get comfortable tap targets */
+    .btn{padding:11px 16px;min-height:42px}
+    .btn.sm{padding:8px 12px;min-height:34px}
+    .stage-foot{gap:8px}
+    .stage-foot .btn{flex:1 1 100%;min-width:0}
+
+    /* Canvas stage */
+    .canvas-hold{padding:8px;min-height:180px;border-radius:13px}
+    #preview{max-height:46vh}
+    .drop{padding:18px 12px}
+
+    /* Instagram mockup */
+    .mockup-grid{grid-template-columns:1fr;gap:16px;padding:14px 12px}
+    .phone-frame{width:100%;max-width:330px;border-width:8px;border-radius:38px;padding:12px 8px 20px}
+
+    /* Video exporter */
+    .video-grid{grid-template-columns:1fr;gap:16px}
+    .video-shell{padding:14px 12px}
+    .video-preview-box{min-height:240px}
+
+    /* Panorama splitter */
+    .pano-shell{padding:14px 12px}
+    .pano-card{flex:0 0 62vw;max-width:240px}
+
+    /* Metadata cleaner */
+    .meta-shell{padding:14px 12px}
+    .meta-grid{grid-template-columns:1fr;gap:14px}
+    .meta-card{padding:14px}
+    .meta-table th,.meta-table td{display:block;width:auto;padding:6px 0;border-bottom:0}
+    .meta-table th{padding-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+    .meta-table tr{display:block;border-bottom:1px solid var(--line)}
+    .meta-table tr:last-child{border-bottom:0}
+    #metaPreview{max-height:220px}
+
+    /* Lightbox */
+    .lightbox-modal{padding:12px}
+    .lightbox-content{padding:14px;border-radius:18px;max-width:96vw;max-height:94vh}
+    .lightbox-img-wrapper{max-width:88vw;max-height:60vh}
+    .lightbox-img-wrapper img{max-height:60vh}
+    .lightbox-footer{flex-direction:column;align-items:stretch;gap:10px}
+    .lightbox-actions .btn{flex:1}
+
+    .mask-toolbar{gap:6px}
+    .hud-badge-preview{flex-wrap:wrap}
+  }
+
+  /* Small phones ---------------------------------------------- */
+  @media (max-width:400px){
+    .picks,.picks-3{grid-template-columns:1fr!important}
+    .picks-4{grid-template-columns:repeat(2,1fr)}
+    header h1{font-size:14px}
+    .flow,.stage{padding-left:10px;padding-right:10px}
+  }
+
+  /* Landscape phones — reclaim vertical space ------------------ */
+  @media (max-height:520px) and (orientation:landscape){
+    #preview{max-height:70vh}
+    .app-tabs{padding-top:5px;padding-bottom:5px}
+  }
+
+  @media (hover:none){
+    .btn:hover,.pick:hover,.step:hover,.mark:hover{transform:none;filter:none;box-shadow:none}
+    .mark:hover{box-shadow:0 0 0 1px rgba(10,132,255,.3), 0 4px 14px rgba(10,132,255,.35)}
+  }
 </style>
 </head>
 <body>
