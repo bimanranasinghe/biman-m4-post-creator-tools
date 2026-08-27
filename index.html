@@ -1183,18 +1183,26 @@
         <table class="meta-table" id="metaInspectorTable">
           <tr><th>File Name</th><td id="metaFileName">-</td></tr>
           <tr><th>Resolution</th><td id="metaResolution">-</td></tr>
-          <tr><th>GPS Location</th><td id="metaGPS"><span class="tag green">Clean (No GPS)</span></td></tr>
+          <tr><th>GPS Location</th><td id="metaGPS">-</td></tr>
           <tr><th>Camera Model</th><td id="metaCamera">-</td></tr>
           <tr><th>Lens & ISO</th><td id="metaLens">-</td></tr>
-          <tr><th>Status</th><td id="metaStatus"><span class="tag blue">Ready to Clean</span></td></tr>
+          <tr><th>Date Taken</th><td id="metaDate">-</td></tr>
+          <tr><th>Hidden Data</th><td id="metaBytes">-</td></tr>
+          <tr><th>Status</th><td id="metaStatus"><span class="tag blue">Waiting for a photo</span></td></tr>
         </table>
       </div>
     </div>
 
     <div>
       <div class="meta-card">
+        <h3 style="margin-top:0;font-size:14px;color:var(--ok)">Preview</h3>
+        <img id="metaPreview" alt="Preview of the uploaded photo" style="display:none;width:100%;max-height:260px;object-fit:contain;background:var(--ink-2);border-radius:10px;border:1px solid var(--line)">
+        <p class="note">This exact photo is what gets re-encoded and downloaded — not the post editor canvas.</p>
+      </div>
+
+      <div class="meta-card" style="margin-top:12px">
         <h3 style="margin-top:0;font-size:14px;color:var(--ok)">Privacy Protection Summary</h3>
-        <p class="note">When you export from Biman.m4 Studio, all EXIF metadata, GPS latitude/longitude, and camera serial numbers are automatically 100% stripped to protect your car location and identity.</p>
+        <p class="note">Exporting redraws the pixels into a fresh canvas, so every EXIF block, GPS latitude/longitude, camera serial, timestamp, XMP and IPTC segment is dropped from the downloaded file. Only a standard sRGB colour profile remains, and the image keeps its full original resolution.</p>
       </div>
     </div>
   </div>
@@ -2122,23 +2130,238 @@ async function startCanvasVideoExport(){
 /* ========================================================================= */
 /* METADATA CLEANER & EXIF PRIVACY                                           */
 /* ========================================================================= */
-function inspectFileMetadata(e){
+/* Holds the photo uploaded inside the Metadata Cleaner tab (independent of the editor canvas) */
+const metaState = { file:null, bitmap:null, exif:null, metaBytes:0 };
+
+const EXIF_TYPE_SIZE = {1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8};
+
+/* Minimal EXIF/TIFF reader — returns the tags we surface in the UI */
+function readExifFromJpeg(buffer){
+  const view = new DataView(buffer);
+  if(view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return null;
+
+  let offset = 2, exifStart = -1, metaBytes = 0;
+  while(offset < view.byteLength - 1){
+    if(view.getUint8(offset) !== 0xFF) break;
+    const marker = view.getUint8(offset + 1);
+    if(marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)){ offset += 2; continue; }
+    if(marker === 0xDA) break; // start of scan — pixel data begins
+    const size = view.getUint16(offset + 2);
+    // Count only privacy-bearing segments: EXIF/XMP (APP1), IPTC/Photoshop (APP3-APP13),
+    // APP15 and comments. APP0 (JFIF) and APP2 (ICC colour profile) carry no personal data.
+    const isPrivacySegment = marker === 0xE1 || (marker >= 0xE3 && marker <= 0xED) || marker === 0xEF || marker === 0xFE;
+    if(isPrivacySegment) metaBytes += size + 2;
+    if(marker === 0xE1 && size > 8 && view.getUint32(offset + 4) === 0x45786966) exifStart = offset + 10;
+    offset += 2 + size;
+  }
+  if(exifStart < 0) return { metaBytes, tags:{} };
+
+  const le = view.getUint16(exifStart) === 0x4949;
+  const u16 = p => view.getUint16(p, le);
+  const u32 = p => view.getUint32(p, le);
+  if(u16(exifStart + 2) !== 0x002A) return { metaBytes, tags:{} };
+
+  const tags = {};
+  const readValue = (type, count, valuePtr) => {
+    const size = EXIF_TYPE_SIZE[type] || 1;
+    const ptr = (size * count > 4) ? exifStart + u32(valuePtr) : valuePtr;
+    if(ptr < 0 || ptr + size * count > view.byteLength) return null;
+    if(type === 2){
+      let s = '';
+      for(let i = 0; i < count; i++){
+        const c = view.getUint8(ptr + i);
+        if(c === 0) break;
+        s += String.fromCharCode(c);
+      }
+      return s.trim();
+    }
+    const out = [];
+    for(let i = 0; i < count; i++){
+      const p = ptr + i * size;
+      if(type === 3) out.push(u16(p));
+      else if(type === 4) out.push(u32(p));
+      else if(type === 5) out.push(u32(p + 4) === 0 ? 0 : u32(p) / u32(p + 4));
+      else if(type === 10) out.push(view.getInt32(p + 4, le) === 0 ? 0 : view.getInt32(p, le) / view.getInt32(p + 4, le));
+      else out.push(view.getUint8(p));
+    }
+    return count === 1 ? out[0] : out;
+  };
+
+  const readIfd = (ifdPtr, into) => {
+    if(ifdPtr < 0 || ifdPtr + 2 > view.byteLength) return;
+    const count = u16(ifdPtr);
+    for(let i = 0; i < count; i++){
+      const entry = ifdPtr + 2 + i * 12;
+      if(entry + 12 > view.byteLength) return;
+      into[u16(entry)] = readValue(u16(entry + 2), u32(entry + 4), entry + 8);
+    }
+  };
+
+  const ifd0 = {}, sub = {}, gps = {};
+  readIfd(exifStart + u32(exifStart + 4), ifd0);
+  if(ifd0[0x8769]) readIfd(exifStart + ifd0[0x8769], sub);
+  if(ifd0[0x8825]) readIfd(exifStart + ifd0[0x8825], gps);
+
+  tags.make = ifd0[0x010F];
+  tags.model = ifd0[0x0110];
+  tags.software = ifd0[0x0131];
+  tags.date = sub[0x9003] || ifd0[0x0132];
+  tags.artist = ifd0[0x013B];
+  tags.lens = sub[0xA434];
+  tags.serial = sub[0xA431] || sub[0xA435];
+  tags.iso = Array.isArray(sub[0x8827]) ? sub[0x8827][0] : sub[0x8827];
+  tags.fnumber = sub[0x829D];
+  tags.focal = sub[0x920A];
+
+  const toDeg = (dms, ref) => {
+    if(!Array.isArray(dms) || dms.length < 3) return null;
+    let d = dms[0] + dms[1] / 60 + dms[2] / 3600;
+    if(ref === 'S' || ref === 'W') d = -d;
+    return d;
+  };
+  const lat = toDeg(gps[0x0002], gps[0x0001]);
+  const lon = toDeg(gps[0x0004], gps[0x0003]);
+  if(lat !== null && lon !== null) tags.gps = { lat, lon };
+
+  return { metaBytes, tags };
+}
+
+/* Counts metadata chunk bytes in a PNG (tEXt / iTXt / zTXt / eXIf / tIME) */
+function readPngMetaBytes(buffer){
+  const view = new DataView(buffer);
+  const sig = [137,80,78,71,13,10,26,10];
+  for(let i = 0; i < 8; i++) if(view.getUint8(i) !== sig[i]) return null;
+  const junk = ['tEXt','iTXt','zTXt','eXIf','tIME','iCCP'];
+  let offset = 8, bytes = 0;
+  while(offset + 8 <= view.byteLength){
+    const len = view.getUint32(offset);
+    let type = '';
+    for(let i = 0; i < 4; i++) type += String.fromCharCode(view.getUint8(offset + 4 + i));
+    if(type === 'IEND') break;
+    if(junk.includes(type)) bytes += len + 12;
+    offset += len + 12;
+  }
+  return bytes;
+}
+
+const kb = b => `${(b/1024).toFixed(1)} KB`;
+const tagRed = t => `<span class="tag red">${t}</span>`;
+const tagGreen = t => `<span class="tag green">${t}</span>`;
+
+async function inspectFileMetadata(e){
   const file = e.target.files[0];
   if(!file) return;
 
-  document.getElementById('metaFileName').innerText = file.name;
-  document.getElementById('metaResolution').innerText = `${file.size} bytes (${Math.round(file.size/1024)} KB)`;
-  document.getElementById('metaGPS').innerHTML = '<span class="tag red">GPS Found (Location Private)</span>';
-  document.getElementById('metaCamera').innerText = 'Sony A7 IV / Apple iPhone (Stripped on Export)';
-  document.getElementById('metaLens').innerText = '50mm f/1.4 GM • ISO 100';
-  document.getElementById('metaStatus').innerHTML = '<span class="tag green">Ready to Clean</span>';
+  const setCell = (id, html) => { const el = document.getElementById(id); if(el) el.innerHTML = html; };
+
+  metaState.file = file;
+  metaState.exif = null;
+  metaState.metaBytes = 0;
+  setCell('metaFileName', file.name);
+  setCell('metaStatus', '<span class="tag blue">Reading file…</span>');
+
+  const buffer = await file.arrayBuffer();
+  const exif = readExifFromJpeg(buffer);
+  const pngBytes = exif ? null : readPngMetaBytes(buffer);
+  metaState.exif = exif;
+  metaState.metaBytes = exif ? exif.metaBytes : (pngBytes || 0);
+
+  // Decode for real dimensions + to build the cleaned copy
+  let bitmap = null;
+  try{
+    bitmap = await createImageBitmap(file);
+  }catch(err){
+    console.log('[v0] createImageBitmap failed, falling back to Image()', err);
+    bitmap = await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  metaState.bitmap = bitmap;
+
+  const w = bitmap.width, h = bitmap.height;
+  setCell('metaResolution', `${w} × ${h} px • ${kb(file.size)} • ${file.type || 'unknown type'}`);
+
+  const preview = document.getElementById('metaPreview');
+  if(preview){
+    const pc = document.createElement('canvas');
+    const scale = Math.min(1, 420 / Math.max(w, h));
+    pc.width = Math.round(w * scale); pc.height = Math.round(h * scale);
+    pc.getContext('2d').drawImage(bitmap, 0, 0, pc.width, pc.height);
+    preview.src = pc.toDataURL('image/jpeg', 0.8);
+    preview.style.display = 'block';
+  }
+
+  const t = (exif && exif.tags) || {};
+  if(t.gps){
+    setCell('metaGPS', `${tagRed('GPS FOUND')} <code>${t.gps.lat.toFixed(6)}, ${t.gps.lon.toFixed(6)}</code>`);
+  }else{
+    setCell('metaGPS', tagGreen('No GPS coordinates'));
+  }
+
+  const camera = [t.make, t.model].filter(Boolean).join(' ');
+  setCell('metaCamera', camera ? `${camera}${t.serial ? ` ${tagRed('serial: ' + t.serial)}` : ''}` : tagGreen('No camera info'));
+
+  const shot = [
+    t.lens,
+    t.focal ? `${Math.round(t.focal)}mm` : null,
+    t.fnumber ? `f/${(+t.fnumber).toFixed(1)}` : null,
+    t.iso ? `ISO ${t.iso}` : null
+  ].filter(Boolean).join(' • ');
+  setCell('metaLens', shot || tagGreen('No lens / exposure data'));
+
+  const dateEl = document.getElementById('metaDate');
+  if(dateEl) dateEl.innerHTML = t.date ? tagRed(t.date) : tagGreen('No timestamp');
+
+  const bytesEl = document.getElementById('metaBytes');
+  if(bytesEl){
+    bytesEl.innerHTML = metaState.metaBytes > 0
+      ? tagRed(`${kb(metaState.metaBytes)} of hidden metadata`)
+      : tagGreen('0 KB — already clean');
+  }
+
+  const hasMeta = metaState.metaBytes > 0 || !!camera || !!t.gps || !!t.date;
+  setCell('metaStatus', hasMeta
+    ? '<span class="tag red">Metadata detected — export to strip it</span>'
+    : '<span class="tag green">Already clean — export re-encodes anyway</span>');
 }
 
-function downloadCleanedImage(){
+/* Re-encoding pixels through a canvas drops every EXIF/GPS/XMP/ICC segment */
+async function downloadCleanedImage(){
+  if(!metaState.bitmap){
+    alert('Upload a photo in the Metadata Cleaner tab first.');
+    document.getElementById('metaFileInput')?.click();
+    return;
+  }
+
+  const src = metaState.bitmap;
+  const out = document.createElement('canvas');
+  out.width = src.width;
+  out.height = src.height;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+
+  const isPng = (metaState.file?.type || '').includes('png');
+  const mime = isPng ? 'image/png' : 'image/jpeg';
+  const ext = isPng ? 'png' : 'jpg';
+  const base = (metaState.file?.name || 'photo').replace(/\.[^.]+$/, '');
+
+  const blob = await new Promise(res => out.toBlob(res, mime, 0.95));
+  if(!blob){ alert('Could not encode the cleaned image.'); return; }
+
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.download = `${state.fileName}_clean_privacy.jpg`;
-  a.href = canvas.toDataURL('image/jpeg', 0.95);
+  a.download = `${base}_clean_privacy.${ext}`;
+  a.href = url;
+  document.body.appendChild(a);
   a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+  const status = document.getElementById('metaStatus');
+  if(status) status.innerHTML = tagGreen(`Cleaned & downloaded • ${kb(blob.size)} (was ${kb(metaState.file.size)})`);
 }
 
 /* ========================================================================= */
